@@ -193,16 +193,19 @@ class DRAMStandard(Component):
         # Validate channel_width
         cw = org_dict["channel_width"]
         dq = org_dict["dq"]
+        # What one transaction moves. The standard states it for itself, and an organization whose
+        # burst is not the standard's — a channel one beat wide, say — states its own.
+        payload = org_dict.get("data_payload_bytes", cls.data_payload_bytes)
         if not isinstance(cw, int) or cw <= 0:
             raise ValueError(f"{cls.name}: channel_width must be positive, got {cw}")
         if not isinstance(dq, int) or dq <= 0:
             raise ValueError(f"{cls.name}: dq must be positive, got {dq}")
-        if cls.data_payload_bytes is None and (cw & (cw - 1)) != 0:
+        if payload is None and (cw & (cw - 1)) != 0:
             raise ValueError(f"{cls.name}: channel_width must be a positive power of 2, got {cw}")
         if cw % dq != 0:
             raise ValueError(f"{cls.name}: channel_width ({cw}) must be a multiple of dq ({dq})")
-        if cls.data_payload_bytes is not None and cls.data_payload_bytes <= 0:
-            raise ValueError(f"{cls.name}: data_payload_bytes must be positive, got {cls.data_payload_bytes}")
+        if payload is not None and payload <= 0:
+            raise ValueError(f"{cls.name}: data_payload_bytes must be positive, got {payload}")
 
         verbose_timing_dict = None
         if self._verbose and not self._verbose_printed:
@@ -299,8 +302,8 @@ class DRAMStandard(Component):
             "read_latency": cls._eval_expr(cls.read_latency, timing_dict),
             "timing_constraints": constraints,
         }
-        if cls.data_payload_bytes is not None:
-            config["data_payload_bytes"] = cls.data_payload_bytes
+        if payload is not None:
+            config["data_payload_bytes"] = payload
         if verbose_timing_dict is not None:
             print(self._format_final_timings(verbose_timing_dict), file=sys.stderr)
             self._verbose_printed = True

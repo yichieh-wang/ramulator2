@@ -32,6 +32,8 @@ class HBMControllerBase : public ControllerBase {
   void hbm_tick_prologue();
   void hbm_tick_epilogue();
   std::optional<IssuedCommand> try_issue_slot(SlotType slot);
+  // Whether a command in the priority buffer names this request's bank.
+  bool held_by_priority(const Request& req) const;
 };
 
 }  // namespace Ramulator

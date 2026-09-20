@@ -119,31 +119,49 @@ class HBM4(DRAMStandard):
 
     @classmethod
     def resolve_secondary_timings(cls, timing_dict, org_dict):
+        # A preset states what it knows and leaves the rest here. Every value below is filled only
+        # when the preset did not state it, so a preset off the JEDEC tables — a column channel,
+        # whose density and rate no table lists — can name its own refresh and its own tCCD
+        # instead of being handed a -1.
         tCK_ps = timing_dict["tCK_ps"]
-        channel_density = org_dict["channel_density"]
-        timing_dict["nRC"] = timing_dict["nRAS"] + timing_dict["nRP"]
-        timing_dict["nCCDL"] = cls._resolve_nCCDL(tCK_ps)
-        timing_dict["nCCDR"] = cls._resolve_nCCDR(
-            timing_dict["rate"], tCK_ps, org_dict["sid"], timing_dict["nCCDS"]
-        )
-        timing_dict["nRTW"] = cls._resolve_nRTW(timing_dict, tCK_ps)
-        timing_dict["nRFC"] = cls._resolve_nRFC(
-            org_dict["die_density"], org_dict["stack_height"],
-            channel_density, tCK_ps,
-        )
-        timing_dict["nRFCpb"] = cls._resolve_nRFCpb(
-            org_dict["die_density"], tCK_ps
-        )
-        timing_dict["nRFMab"] = timing_dict["nRFC"]
-        timing_dict["nRFMpb"] = timing_dict["nRFCpb"]
-        timing_dict["nREFI"] = cls._resolve_nREFI(tCK_ps)
-        timing_dict["nREFIpb"] = cls._resolve_nREFIpb(
-            tCK_ps,
-            org_dict["bank"],
-            org_dict["bankgroup"],
-            org_dict["sid"],
-        )
-        timing_dict["nRREFD"] = cls._resolve_nRREFD(tCK_ps)
+
+        def unsaid(name):
+            return name not in timing_dict
+
+        if unsaid("nRC"):
+            timing_dict["nRC"] = timing_dict["nRAS"] + timing_dict["nRP"]
+        if unsaid("nCCDL"):
+            timing_dict["nCCDL"] = cls._resolve_nCCDL(tCK_ps)
+        if unsaid("nCCDR"):
+            timing_dict["nCCDR"] = cls._resolve_nCCDR(
+                timing_dict["rate"], tCK_ps, org_dict["sid"], timing_dict["nCCDS"]
+            )
+        if unsaid("nRTW"):
+            timing_dict["nRTW"] = cls._resolve_nRTW(timing_dict, tCK_ps)
+        if unsaid("nRFC"):
+            timing_dict["nRFC"] = cls._resolve_nRFC(
+                org_dict["die_density"], org_dict["stack_height"],
+                org_dict["channel_density"], tCK_ps,
+            )
+        if unsaid("nRFCpb"):
+            timing_dict["nRFCpb"] = cls._resolve_nRFCpb(
+                org_dict["die_density"], tCK_ps
+            )
+        if unsaid("nRFMab"):
+            timing_dict["nRFMab"] = timing_dict["nRFC"]
+        if unsaid("nRFMpb"):
+            timing_dict["nRFMpb"] = timing_dict["nRFCpb"]
+        if unsaid("nREFI"):
+            timing_dict["nREFI"] = cls._resolve_nREFI(tCK_ps)
+        if unsaid("nREFIpb"):
+            timing_dict["nREFIpb"] = cls._resolve_nREFIpb(
+                tCK_ps,
+                org_dict["bank"],
+                org_dict["bankgroup"],
+                org_dict["sid"],
+            )
+        if unsaid("nRREFD"):
+            timing_dict["nRREFD"] = cls._resolve_nRREFD(tCK_ps)
 
     @staticmethod
     def _resolve_nCCDL(tCK_ps):
@@ -258,3 +276,84 @@ HBM4.timing_presets = {
         # =============================
     },
 }
+
+
+# ---- The column channel ---------------------------------------------------------------------
+#
+# A DRAM stack bonded face to face under the compute reticle. A channel there is the column of
+# banks under one tile — one bank a DRAM layer — reached over bonded pads instead of a PHY, so it
+# is wide and slow: the whole channel width moves in one beat at the array's own clock. None of
+# HBM's packaging levels are in a column, so pseudo-channel, SID and bank group all count 1, which
+# is as simple as the HBM4 level list allows (the C++ carries all seven levels either way, and a
+# level of count 1 costs one address bit of nothing). The array is HBM4's, so the timings are
+# HBM4-8000's own nanoseconds (below), stated in whole cycles of whatever clock the column runs at.
+
+# The array timings a column keeps are HBM4-8000's own, read off the preset above (cycles at its
+# tCK, turned into nanoseconds) so there is one place they are written; ramulator2 marks that
+# preset's values a guesstimate, and a column inherits that. Refresh is not in the preset — the
+# resolver looks it up by die density — so the two refresh times are stated here from the JEDEC
+# table for the 16-high 32 Gb stack (JESD270-4A Table 108): all-bank 530 ns, per-bank 280 ns. A
+# column is refreshed a bank at a time, so it is nRFCpb the streams feel.
+COLUMN_ARRAY_FROM = "HBM4_8000Mbps"
+COLUMN_ARRAY_KEYS = ("nCL", "nCWL", "nRAS", "nRP", "nRCDRD", "nRCDWR", "nRRDL", "nRRDS", "nFAW", "nRTP", "nWR", "nWTRL", "nWTRS", "nPPD")
+COLUMN_REFRESH_NS = {"nRFC": 530.0, "nRFCpb": 280.0}
+
+
+def column_array_ns():
+    """HBM4's array timings in nanoseconds, from the preset they are kept in."""
+    preset = HBM4.timing_presets[COLUMN_ARRAY_FROM]
+    ns = {name: preset[name] * preset["tCK_ps"] / 1000 for name in COLUMN_ARRAY_KEYS}
+    ns.update(COLUMN_REFRESH_NS)
+    return ns
+
+
+def column_org(channel_width_bits, banks, rows, row_bytes=1024):
+    """A column's organization: `channel_width_bits` data bits under one tile, `banks` banks (one a
+    layer) of `rows` rows, each row `row_bytes` wide. One beat of the channel is one transaction,
+    so data_payload_bytes is the channel width in bytes and the column count is the row's worth of
+    beats times the standard's prefetch — the address mapper drops prefetch column bits, one
+    transaction covering them all. None of HBM's packaging levels are in a column: pseudo-channel,
+    SID and bank group count 1."""
+    beat = channel_width_bits // 8
+    if channel_width_bits % 8 or beat <= 0:
+        raise ValueError(f"a column channel of {channel_width_bits} bits is no whole number of bytes a beat")
+    if row_bytes % beat:
+        raise ValueError(f"a row of {row_bytes} bytes is no whole number of {beat}-byte beats")
+    beats_per_row = row_bytes // beat
+    for name, count in (("banks", banks), ("rows", rows), ("beats a row", beats_per_row)):
+        if count <= 0 or count & (count - 1):
+            raise ValueError(f"a column channel's {name} must be a power of two, and {count} is not — the address mapper cuts whole bits")
+    channel_mbit = banks * rows * row_bytes * 8 // (1 << 20)
+    return {
+        "die_density": channel_mbit // banks, "channel_density": channel_mbit, "stack_height": banks,
+        "dq": channel_width_bits, "channel_width": channel_width_bits,
+        "pseudochannel": 1, "sid": 1, "bankgroup": 1, "bank": banks,
+        "row": rows, "column": beats_per_row * HBM4.internal_prefetch_size,
+        "data_payload_bytes": beat,
+    }
+
+
+def column_timing(line_rate_gbps):
+    """A column's timing at `line_rate_gbps` a pin: one bit a pin a cycle, so the cycle is the pin's,
+    and one beat — one transaction — is one cycle. The array numbers are HBM4's nanoseconds
+    rounded up to whole cycles. Nothing but the bus separates two column commands in a column, so
+    tCCD is the beat, over bank groups and SIDs that are not there."""
+    rate = int(round(line_rate_gbps * 1000))
+    if 1_000_000 % rate:
+        raise ValueError(f"{line_rate_gbps} Gbps a pin is not a whole number of picoseconds a cycle")
+    tCK_ps = 1_000_000 // rate
+    timing = {name: math.ceil(ns * 1000 / tCK_ps) for name, ns in column_array_ns().items()}
+    timing["rate"] = rate
+    timing["tCK_ps"] = tCK_ps
+    timing["nBL"] = 1
+    timing["nCCDS"] = timing["nCCDL"] = timing["nCCDR"] = timing["nBL"]
+    # JESD270-4A Tables 107 and 108, Note 18, at this column's cycle.
+    timing["nRTW"] = timing["nCL"] + timing["nBL"] - timing["nCWL"] + math.ceil(0.5 + 2_400 / tCK_ps)
+    return timing
+
+
+# The design point: the 16-high column under a tile, 512 data bits at 1 GHz, 1 KiB rows, 1 GiB a
+# channel. `render_column` in the harness's configs starts from these two and overrides whatever
+# the design it is given states differently.
+HBM4.org_presets["Column_16Hi_512b"] = column_org(512, banks=16, rows=1 << 16)
+HBM4.timing_presets["Column_1000Mbps"] = column_timing(1.0)
