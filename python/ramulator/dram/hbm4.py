@@ -280,7 +280,7 @@ HBM4.timing_presets = {
 
 # ---- The column channel ---------------------------------------------------------------------
 #
-# A DRAM stack bonded face to face under the compute reticle. A channel there is the column of
+# A DRAM stack bonded face to face on the compute reticle. A channel there is the column of
 # banks under one tile — one bank a DRAM layer — reached over bonded pads instead of a PHY, so it
 # is wide and slow: the whole channel width moves in one beat at the array's own clock. None of
 # HBM's packaging levels are in a column, so pseudo-channel, SID and bank group all count 1, which
@@ -352,7 +352,7 @@ def column_timing(line_rate_gbps):
     return timing
 
 
-# The design point: the 16-high column under a tile, 512 data bits at 1 GHz, 1 KiB rows, 1 GiB a
+# The design point: the 16-high column over a tile, 512 data bits at 1 GHz, 1 KiB rows, 1 GiB a
 # channel. `render_column` in the harness's configs starts from these two and overrides whatever
 # the design it is given states differently.
 HBM4.org_presets["Column_16Hi_512b"] = column_org(512, banks=16, rows=1 << 16)
